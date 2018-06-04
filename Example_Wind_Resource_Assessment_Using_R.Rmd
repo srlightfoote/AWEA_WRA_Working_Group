@@ -19,11 +19,11 @@ knitr::opts_chunk$set(
 ```
 
 ```{r personal info, message=FALSE, warning=FALSE, include=FALSE}
-api_key='LhVBL5knO2kvXXwbrbgAtYUL5aGbwqLfuegppGzJ'
-name = 'Stephen+Lightfoote'
-reason = 'solar+resource'
-affiliation = 'AWSTruepower'
-email = 'slightfoote@awstruepower.com'
+api_key='YOUR KEY HERE'
+name = 'YOUR NAME HERE'
+reason = 'wind+resource'
+affiliation = 'YOUR AFFILIATION'
+email = 'YOUR EMAIL'
 mailing_list = 'false'
 ```
 

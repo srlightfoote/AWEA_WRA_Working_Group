@@ -43,50 +43,11 @@ library(raster) # geospatial
 library(leaflet) # mapping
 ```
 
-## Site Screening
-Next, let's see if we have a decent area for a wind turbine.  Wind turbines in general should be located with sufficient setbacks from existing structure, on "flat" enough terrain to contain the structure (minimal terrain slope) and sufficient site access to be able to roll a truck to, amongst MANY others.  It also helps if the location is on a higher elevation than the surrounding area as these generally are windier areas.  Let's see how my backyard stacks up with these criteria.
-
-```{r map}
-lat=42.2756887
-lon=-71.21161789999996
-
-# download elevation data
-prj_dd <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
-elev<-get_elev_raster(data.frame(x=lon,y=lat),z = 13,prj = prj_dd,src = 'aws')
-crs(elev) <- CRS(prj_dd)
-
-#calculate slope
-slope=terrain(elev,opt='slope',unit = 'degrees')
-
-# plot color schemes
-pal_elev <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(elev),
-  na.color = "transparent")
-pal_slope <- colorNumeric('YlOrRd', values(slope),
-  na.color = "transparent")
-
-# render map
-leaflet() %>% 
-  addProviderTiles(providers$Esri.WorldImagery,group='Esri.WorldImagery') %>%
-  addProviderTiles(providers$Esri.WorldTopoMap,group='Esri.WorldTopoMap') %>%
-  addProviderTiles(providers$Esri.WorldShadedRelief,group='Esri.WorldShadedRelief') %>%
-  addRasterImage(elev, colors = pal_elev, opacity = 0.8,group='elevation') %>%
-  addRasterImage(slope, colors = pal_slope, opacity = 0.8,group='slope') %>%
-  addMarkers(lon,lat,popup='Turbine Location') %>%
-  addLegend(pal = pal_elev, values = values(elev),title = "Elevation",position='topright') %>%
-  addLegend(pal = pal_slope, values = values(slope),title = "Slope",position='bottomright') %>%
-  addLayersControl(
-    baseGroups = c("Esri.WorldTopoMap", "Esri.WorldImagery","Esri.WorldShadedRelief"),
-    overlayGroups = c("elevation", "slope"),
-    options = layersControlOptions(collapsed = FALSE),
-    position = 'topleft') %>% 
-  hideGroup("slope")
-```
-
-So... not so good.  There's plenty of existing structures in the area and there are better elevated areas nearby that would be better suited for the turbine.  At least the slopes are minimal and there is definitely site access.  Let's continue with the example regardless.
-
 ## Get Wind Data
 Next, we'll download some sample wind resource data from NREL's wind toolkit to see how energetic my location is.  The variable arguments in the paste statement below should be replaced with your own information (see https://developer.nrel.gov/signup/ to get an API key).
 ```{r, get data}
+lat=42.2756887
+lon=-71.21161789999996
 url<-paste('http://developer.nrel.gov/api/wind-toolkit/wind/wtk_download.csv?api_key=',api_key,'&wkt=POINT(',lon,'%20',lat,
 ')&attributes=wind_speed,wind_direction,power,temperature,pressure&names=2009&full_name=',name,'&email=',email,'&affiliation=',affiliation,
 '&reason=Example',sep='')

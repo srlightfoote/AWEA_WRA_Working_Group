@@ -1,0 +1,211 @@
+---
+title: Example Wind Resource Assessment Using R
+author: Stephen Lightfoote
+date: '2018-05-30'
+always_allow_html: yes
+output:
+  github_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE,
+	fig.align = 'center'
+)
+```
+
+```{r personal info, message=FALSE, warning=FALSE, include=FALSE}
+api_key='LhVBL5knO2kvXXwbrbgAtYUL5aGbwqLfuegppGzJ'
+name = 'Stephen+Lightfoote'
+reason = 'solar+resource'
+affiliation = 'AWSTruepower'
+email = 'slightfoote@awstruepower.com'
+mailing_list = 'false'
+```
+
+# Example Wind Resource Assessment
+The goal here is to illustrate how aspects of typical wind resource assessment and energy capture from meteorological data can be accomplished using open source tools, in this case using R.  Using publicly available data, I'll walk through some of the typical steps taken in site screening, importing, visualizing and analyzing meteorological data with the goal of modeling the annual energy capture of a wind turbine at a given location.  For kicks, as a wink to the NIMBY's out there, let's use my backyard as the example.
+
+## Packages
+First, load the R packages used to do the analysis.
+```{r, libraries}
+library(tidyverse) # r-package ecosystem
+library(MASS) # statistical functions
+library(knitr) # fancy tables
+library(clifro) # windrose plot
+library(scales) # percentages
+library(elevatr) # elevation data
+library(raster) # geospatial
+library(leaflet) # mapping
+```
+
+## Site Screening
+Next, let's see if we have a decent area for a wind turbine.  Wind turbines in general should be located with sufficient setbacks from existing structure, on "flat" enough terrain to contain the structure (minimal terrain slope) and sufficient site access to be able to roll a truck to, amongst MANY others.  It also helps if the location is on a higher elevation than the surrounding area as these generally are windier areas.  Let's see how my backyard stacks up with these criteria.
+
+```{r map}
+lat=42.2756887
+lon=-71.21161789999996
+
+# download elevation data
+prj_dd <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+elev<-get_elev_raster(data.frame(x=lon,y=lat),z = 13,prj = prj_dd,src = 'aws')
+crs(elev) <- CRS(prj_dd)
+
+#calculate slope
+slope=terrain(elev,opt='slope',unit = 'degrees')
+
+# plot color schemes
+pal_elev <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(elev),
+  na.color = "transparent")
+pal_slope <- colorNumeric('YlOrRd', values(slope),
+  na.color = "transparent")
+
+# render map
+leaflet() %>% 
+  addProviderTiles(providers$Esri.WorldImagery,group='Esri.WorldImagery') %>%
+  addProviderTiles(providers$Esri.WorldTopoMap,group='Esri.WorldTopoMap') %>%
+  addProviderTiles(providers$Esri.WorldShadedRelief,group='Esri.WorldShadedRelief') %>%
+  addRasterImage(elev, colors = pal_elev, opacity = 0.8,group='elevation') %>%
+  addRasterImage(slope, colors = pal_slope, opacity = 0.8,group='slope') %>%
+  addMarkers(lon,lat,popup='Turbine Location') %>%
+  addLegend(pal = pal_elev, values = values(elev),title = "Elevation",position='topright') %>%
+  addLegend(pal = pal_slope, values = values(slope),title = "Slope",position='bottomright') %>%
+  addLayersControl(
+    baseGroups = c("Esri.WorldTopoMap", "Esri.WorldImagery","Esri.WorldShadedRelief"),
+    overlayGroups = c("elevation", "slope"),
+    options = layersControlOptions(collapsed = FALSE),
+    position = 'topleft') %>% 
+  hideGroup("slope")
+```
+
+So... not so good.  There's plenty of existing structures in the area and there are better elevated areas nearby that would be better suited for the turbine.  At least the slopes are minimal and there is definitely site access.  Let's continue with the example regardless.
+
+## Get Wind Data
+Next, we'll download some sample wind resource data from NREL's wind toolkit to see how energetic my location is.  The variable arguments in the paste statement below should be replaced with your own information (see https://developer.nrel.gov/signup/ to get an API key).
+```{r, get data}
+url<-paste('http://developer.nrel.gov/api/wind-toolkit/wind/wtk_download.csv?api_key=',api_key,'&wkt=POINT(',lon,'%20',lat,
+')&attributes=wind_speed,wind_direction,power,temperature,pressure&names=2009&full_name=',name,'&email=',email,'&affiliation=',affiliation,
+'&reason=Example',sep='')
+
+#download data as a dataframe
+df<-read_csv(url,skip=3,col_types = cols())
+# tidy names
+names(df)<-gsub("[^[:alnum:]]", "", names(df))
+# convert dates to timestamp
+df$timestamp_utc=as.POSIXct(paste(df$Year,df$Month,df$Day,df$Hour,df$Minute,'00',sep='-'),format='%Y-%m-%d-%H-%M-%S',tz='UTC')
+
+```
+
+## Exploratory Analysis
+Now to the meat of the post, which is to illustrate how to analyze and visualize typical steps for wind resource assessment.
+
+### Data Structure
+```{r, data structure}
+head(df)
+```
+
+### Timeseries
+```{r, timeseries}
+ggplot(df,aes(timestamp_utc,windspeedat100mms))+geom_line()+theme_minimal()
+```
+
+### Monthly Wind Speed Distribution
+```{r, monthly winds}
+ggplot(df,aes(factor(Month),windspeedat100mms))+
+  geom_boxplot()+
+  theme_minimal()+
+  labs(x='Month')
+```
+
+### Wind Rose
+```{r, wind rose}
+windrose(speed = df$windspeedat100mms,
+                 direction = df$winddirectionat100mdeg,
+                 n_directions = 12,
+                 speed_cuts = seq(0,20,4),
+                 ggtheme='minimal',
+                 col_pal = 'YlGnBu')
+```
+
+### Weibull Fit
+```{r, weibull}
+weibull_fit<-fitdistr(df$windspeedat100mms,'weibull')
+x<-seq(0,20,.01)
+weibull_density<-tibble(x,y=dweibull(x = x,shape = weibull_fit$estimate[1],scale = weibull_fit$estimate[2]))
+ggplot(df,aes(windspeedat100mms))+
+  geom_histogram(aes(y=..density..),bins=30,color='white')+
+  geom_line(data=weibull_density,aes(x=x,y=y),color='red')+
+  theme_minimal()
+```
+
+## Energy Capture
+OK, let's model energy capture for this location.
+
+### Power Curve
+Let's use the GE 1.5SLE 77m turbine power curve as an example.
+```{r, pc}
+url<-'http://www.wind-power-program.com/Downloads/Databasepowercurves(May2017).zip'
+tmp<-tempfile()
+download.file(url,tmp)
+unzip(tmp,files = 'Databasepowercurves(May2017)/HAWTs/500kw and above/General Electric/GE 1.5SLE 77m 1.5MW (MG).pow',junkpaths = T)
+unlink(tmp)
+pc<-read_csv('GE 1.5SLE 77m 1.5MW (MG).pow',
+             skip=5,col_names = F,col_types='n',n_max = 30)
+pc<-tibble(ws=seq(0.5,29.5,1),kw=pc$X1)
+ggplot(pc,aes(ws,kw))+geom_point()+geom_line()+theme_minimal()
+```
+
+### Density Adjust Wind Speed
+It's important to adjust the raw wind speed by air density as wind power density is a function of air density.
+```{r, density adjust}
+df<-mutate(df,air_density=(df$surfaceairpressurePa/df$airtemperatureat2mK*287)*.00001,
+           dc_ws=windspeedat100mms*(air_density/mean(air_density))^(1/3))
+ggplot(df,aes(windspeedat100mms,dc_ws,color=air_density))+
+  geom_point()+
+  theme_minimal()+
+  coord_equal()
+```
+
+### Predict Energy
+We'll use R's approx function to interpolate the equivalent turbine power for each wind speed in the timeseries.  There's lot's of different methods for this of course.
+```{r, energy capture}
+df$kw<-approx(pc$ws,pc$kw,df$dc_ws)$y
+ggplot(df,aes(kw))+
+  geom_density(fill='blue')+
+  theme_minimal()
+```
+
+## Results
+
+### Aggregates
+```{r, aggregate}
+monthly<-df %>%
+  group_by(Month) %>%
+  summarise(hours=n()/12,
+            windspeedat100mms=mean(windspeedat100mms),
+            mwh=sum(kw,na.rm=T)/(1000*12)) %>%
+  mutate(ncf=percent(mwh/(hours*1.5)))
+kable(monthly,digits=1,caption='monthly totals',align='c')
+
+#annual
+annual<-data.frame(mwh=sum(monthly$mwh),ncf=percent(sum(monthly$mwh/(sum(monthly$hours)*1.5))))
+kable(annual,digits=1,caption = 'annual totals',align='c')
+```
+
+Nice, a 41.4% NCF for this location is not too shabby.  If only we could convince the landowner :)
+
+### Comparison with NREL Model
+NREL's dataset comes with an example power measurement based on a 5MW wind turbine.  Let's see how our simple model stacks up using the GE 1.5SLE.  
+```{r, nrel}
+ggplot(df,aes(kw*.001,powerMW))+
+  geom_point()+
+  theme_minimal()+
+  labs(x='GE 1.5sle MW',y='NREL 5MW turbine example MW')
+```
+
+# Conclusions
+Hopefully this was a useful tutorial.  Let me know what you think!
